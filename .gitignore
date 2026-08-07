@@ -1,0 +1,16 @@
+node_modules
+frontend/node_modules
+backend/.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.coverage
+.env
+backend/storage/uploads
+backend/fitwise.db
+frontend/dist
+.DS_Store
+.vscode/.ropeproject
