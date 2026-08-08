@@ -13,6 +13,22 @@ export const api = axios.create({
   timeout: 12000,
 })
 
+// Ensure FormData requests don't carry an explicit Content-Type header
+// so the browser can add the multipart boundary automatically.
+api.interceptors.request.use((config) => {
+  try {
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      if (config.headers) {
+        // Remove explicit Content-Type to let the browser set boundary
+        delete (config.headers as any)['Content-Type']
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return config
+})
+
 export async function listProducts(): Promise<Product[]> {
   const response = await api.get<Product[]>('/products')
   return response.data

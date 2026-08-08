@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Request
+import logging
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import shutil
@@ -68,7 +69,8 @@ def list_products(db: Session = Depends(get_db)) -> list[ProductRead]:
 
 
 @app.post("/products", response_model=ProductCreateResponse)
-def create_product(
+async def create_product(
+    request: Request,
     product_name: str = Form(...),
     category: str = Form(...),
     fabric_type: str = Form(...),
@@ -81,6 +83,22 @@ def create_product(
     tech_pack: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
 ) -> ProductCreateResponse:
+    # Log incoming headers and form keys for debugging multipart/form-data issues
+    try:
+        form = await request.form()
+        logging.info("Incoming headers: %s", dict(request.headers))
+        logging.info("Form keys: %s", list(form.keys()))
+        for k in list(form.keys()):
+            val = form.get(k)
+            try:
+                fname = getattr(val, 'filename', None)
+                if fname:
+                    logging.info("File field %s filename=%s content_type=%s", k, fname, getattr(val, 'content_type', None))
+            except Exception:
+                pass
+    except Exception as e:
+        logging.exception("Failed to read multipart form: %s", e)
+
     try:
         product = create_product_record(
             db,
@@ -96,6 +114,7 @@ def create_product(
             tech_pack=tech_pack,
         )
     except ValueError as exc:
+        logging.exception("Product creation failed due to validation error")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     chart = build_chart(product)
