@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import os
+import re
 import shutil
-from dataclasses import asdict
+import uuid
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ai.fabric_intelligence import apply_fabric_rules
@@ -17,17 +15,20 @@ from ai.ocr_agent import extract_tech_pack_text
 from ai.recommendation_engine import generate_size_chart, recommend_size
 from ai.vision_agent import estimate_measurements_from_images
 from app.core.config import settings
-from app.core.security import hash_password
-from app.models import CustomerProfile, FabricSpec, Feedback, GeneratedSizeChart, Measurement, Product, Recommendation, User
+from app.models import Product, Recommendation
+from pypdf import PdfReader
 
-SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL"]
+DEFAULT_BASELINE = {
+    "chest": 96.0,
+    "waist": 82.0,
+    "hip": 98.0,
+    "sleeve": 59.0,
+    "length": 70.0,
+    "shoulder": 45.0,
+}
+
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".txt"}
-BRAND_PRIORS = {
-    "nike": {"chest": -0.8, "waist": -0.6, "hip": -0.5},
-    "adidas": {"chest": 0.2, "waist": 0.0, "hip": 0.0},
-    "puma": {"chest": -1.0, "waist": -0.7, "hip": -0.4},
-}
 
 
 def ensure_storage() -> Path:
@@ -37,7 +38,7 @@ def ensure_storage() -> Path:
 
 
 def save_upload_file(product_id: str, file_name: str | None, stream, subdir: str) -> str | None:
-    if not file_name:
+    if not file_name or stream is None:
         return None
     suffix = Path(file_name).suffix.lower()
     allowed = ALLOWED_IMAGE_EXTENSIONS | ALLOWED_DOC_EXTENSIONS
@@ -52,284 +53,214 @@ def save_upload_file(product_id: str, file_name: str | None, stream, subdir: str
     return str(target_path)
 
 
-def _normalize_float(value: float | int | None, default: float = 0.0) -> float:
-    if value is None:
-        return default
-    return float(value)
+def extract_tech_pack_text(file_path: str | None) -> str:
+    if not file_path:
+        return ""
+    path = Path(file_path)
+    if not path.exists():
+        return ""
+    if path.suffix.lower() == ".txt":
+        return path.read_text(encoding="utf-8", errors="ignore")
+    if path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        reader = PdfReader(str(path))
+        return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    except Exception:
+        return ""
 
 
-def build_fabric_spec(fabric_type: str, gsm: int | None, stretch_percentage: float | None, weave_type: str | None) -> dict[str, Any]:
-    spec = {
-        "fabric_type": fabric_type,
-        "gsm": gsm,
-        "stretch_percentage": stretch_percentage,
-        "weave_type": weave_type,
-    }
-    return apply_fabric_rules(spec)
+def parse_measurements_from_text(text: str) -> dict[str, float]:
+    measurements: dict[str, float] = {}
+    for key in ("chest", "waist", "hip", "sleeve", "shoulder", "length"):
+        match = re.search(rf"{key}\s*[:=]?\s*(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
+        if match:
+            measurements[key] = float(match.group(1))
+    return measurements
 
 
-def parse_and_structure_tech_pack(tech_pack_path: str | None) -> tuple[str, dict[str, Any]]:
-    if not tech_pack_path:
-        return "", {"measurements": {}, "fabric": {}, "size_table": []}
-    text = extract_tech_pack_text(tech_pack_path)
-    parsed = parse_tech_pack(text)
-    return text, parsed
+def default_baseline_from_product(fabric_type: str, gsm: int | None, stretch_percentage: float | None) -> dict[str, float]:
+    baseline = dict(DEFAULT_BASELINE)
+    fabric = fabric_type.lower()
+    stretch = float(stretch_percentage or 0)
+    if "cotton" in fabric:
+        baseline["length"] += 1.0
+    if "elastane" in fabric or stretch >= 5:
+        baseline["chest"] -= 0.5
+        baseline["waist"] -= 0.5
+    if gsm and gsm >= 240:
+        baseline["shoulder"] += 0.5
+    return baseline
 
 
-def create_product_and_chart(
-    db: Session,
-    seller: User,
-    name: str,
+def build_chart_payload(
     category: str,
-    front_image,
-    back_image,
-    flat_lay_image,
-    tech_pack,
     fabric_type: str,
     gsm: int | None,
     stretch_percentage: float | None,
     weave_type: str | None,
-) -> tuple[Product, GeneratedSizeChart, dict[str, Any]]:
-    product = Product(seller_id=seller.id, name=name, category=category, status="processing")
-    db.add(product)
-    db.flush()
+    tech_pack_text: str,
+    front_image_path: str | None,
+    back_image_path: str | None,
+    flat_lay_image_path: str | None,
+) -> tuple[dict[str, float], dict[str, Any], list[str]]:
+    fabric_info = parse_tech_pack(tech_pack_text)
+    fabric_rules = apply_fabric_rules({
+        "fabric_type": fabric_info["fabric"].get("fabric_type") or fabric_type,
+        "gsm": fabric_info["fabric"].get("gsm") or gsm,
+        "stretch_percentage": fabric_info["fabric"].get("stretch_percentage") or stretch_percentage,
+        "weave_type": fabric_info["fabric"].get("weave_type") or weave_type,
+    })
 
-    product.front_image_path = save_upload_file(product.id, getattr(front_image, "filename", None), getattr(front_image, "file", None), "images")
-    product.back_image_path = save_upload_file(product.id, getattr(back_image, "filename", None), getattr(back_image, "file", None), "images")
-    product.flat_lay_image_path = save_upload_file(product.id, getattr(flat_lay_image, "filename", None), getattr(flat_lay_image, "file", None), "images")
-    product.tech_pack_path = save_upload_file(product.id, getattr(tech_pack, "filename", None), getattr(tech_pack, "file", None), "tech-packs")
-
-    fabric_payload = build_fabric_spec(fabric_type, gsm, stretch_percentage, weave_type)
-    fabric = FabricSpec(
-        product_id=product.id,
-        fabric_type=fabric_payload["fabric_type"],
-        gsm=fabric_payload.get("gsm"),
-        stretch_percentage=fabric_payload.get("stretch_percentage"),
-        weave_type=fabric_payload.get("weave_type"),
-        shrink_allowance=fabric_payload.get("shrink_allowance"),
-        stretch_adjustment=fabric_payload.get("stretch_adjustment"),
-        notes=fabric_payload.get("notes"),
+    baseline = default_baseline_from_product(
+        fabric_rules["fabric_type"], fabric_rules["gsm"], fabric_rules["stretch_percentage"]
     )
-    db.add(fabric)
+    parsed = parse_measurements_from_text(tech_pack_text)
+    if parsed:
+        baseline.update(parsed)
 
-    tech_pack_text, parsed = parse_and_structure_tech_pack(product.tech_pack_path)
-    product.extracted_text = tech_pack_text
-
-    vision = estimate_measurements_from_images(
-        product.front_image_path,
-        product.back_image_path,
-        product.flat_lay_image_path,
-        category=category,
+    vision_estimate = estimate_measurements_from_images(
+        front_image_path, back_image_path, flat_lay_image_path, category
     )
-    measurement_payload = parsed.get("measurements") or {}
-    baseline = {
-        "chest": _normalize_float(measurement_payload.get("chest"), vision.chest),
-        "waist": _normalize_float(measurement_payload.get("waist"), vision.waist),
-        "hip": _normalize_float(measurement_payload.get("hip"), vision.hip),
-        "sleeve": _normalize_float(measurement_payload.get("sleeve"), vision.sleeve),
-        "shoulder": _normalize_float(measurement_payload.get("shoulder"), vision.shoulder),
-        "neck": _normalize_float(measurement_payload.get("neck"), vision.neck),
-        "length": _normalize_float(measurement_payload.get("length"), vision.length),
+    if vision_estimate.confidence >= 0.7:
+        baseline = {
+            "chest": round((baseline["chest"] + vision_estimate.chest) / 2.0, 1),
+            "waist": round((baseline["waist"] + vision_estimate.waist) / 2.0, 1),
+            "hip": round((baseline["hip"] + vision_estimate.hip) / 2.0, 1),
+            "sleeve": round((baseline["sleeve"] + vision_estimate.sleeve) / 2.0, 1),
+            "length": round((baseline["length"] + vision_estimate.length) / 2.0, 1),
+            "shoulder": round((baseline["shoulder"] + vision_estimate.shoulder) / 2.0, 1),
+        }
+
+    fabric_payload = {
+        "fabric_type": fabric_rules["fabric_type"],
+        "gsm": fabric_rules["gsm"],
+        "stretch_percentage": fabric_rules["stretch_percentage"],
+        "weave_type": fabric_rules["weave_type"],
     }
-
-    measurement = Measurement(
-        product_id=product.id,
-        source="vision+ocr+nlp",
-        chest=baseline["chest"],
-        waist=baseline["waist"],
-        hip=baseline["hip"],
-        sleeve=baseline["sleeve"],
-        shoulder=baseline["shoulder"],
-        neck=baseline["neck"],
-        length=baseline["length"],
-        confidence=vision.confidence,
-        raw_data={"vision": vision.as_dict(), "ocr": parsed, "fabric": fabric_payload},
-    )
-    db.add(measurement)
-    db.flush()
-
     chart_payload = generate_size_chart(baseline, fabric_payload, category)
-    validation = validate_measurements(baseline, fabric_payload)
-    generated_chart = GeneratedSizeChart(
-        product_id=product.id,
-        chart_json=chart_payload["sizes"],
-        explainability_json=chart_payload["explainability"],
-        validation_json={"alerts": validation},
+    explanation = [
+        "Product saved successfully.",
+        *fabric_rules.get("notes", []),
+        *chart_payload["explainability"].get("fabric_notes", []),
+        f"Tech pack text was parsed from {len(tech_pack_text)} characters.",
+        f"Vision analysis confidence: {vision_estimate.confidence:.2f}.",
+    ]
+    return baseline, chart_payload, explanation
+
+
+def create_product_record(
+    db: Session,
+    *,
+    name: str,
+    category: str,
+    fabric_type: str,
+    gsm: int | None,
+    stretch_percentage: float | None,
+    weave_type: str | None,
+    front_image,
+    back_image,
+    flat_lay_image,
+    tech_pack,
+) -> Product:
+    product_id = str(uuid.uuid4())
+    front_image_path = save_upload_file(product_id, getattr(front_image, "filename", None), getattr(front_image, "file", None), "images")
+    back_image_path = save_upload_file(product_id, getattr(back_image, "filename", None), getattr(back_image, "file", None), "images")
+    flat_lay_image_path = save_upload_file(product_id, getattr(flat_lay_image, "filename", None), getattr(flat_lay_image, "file", None), "images")
+    tech_pack_path = save_upload_file(product_id, getattr(tech_pack, "filename", None), getattr(tech_pack, "file", None), "tech-packs")
+
+    product = Product(
+        id=product_id,
+        name=name,
+        category=category,
+        fabric_type=fabric_type,
+        gsm=gsm,
+        stretch_percentage=stretch_percentage,
+        weave_type=weave_type,
+        front_image_path=front_image_path,
+        back_image_path=back_image_path,
+        flat_lay_image_path=flat_lay_image_path,
+        tech_pack_path=tech_pack_path,
+        tech_pack_text=extract_tech_pack_text(tech_pack_path),
+        chart_json=[],
+        explanation_json=[],
     )
-    product.status = "ready"
-    product.validation_summary = {"alerts": validation}
-    product.chart_summary = chart_payload["explainability"]
-    db.add(generated_chart)
+
+    tech_pack_text = product.tech_pack_text or ""
+    _, chart_payload, explanation = build_chart_payload(
+        category,
+        fabric_type,
+        gsm,
+        stretch_percentage,
+        weave_type,
+        tech_pack_text,
+        front_image_path,
+        back_image_path,
+        flat_lay_image_path,
+    )
+    product.chart_json = chart_payload["sizes"]
+    product.explanation_json = explanation
+    db.add(product)
     db.commit()
     db.refresh(product)
-    db.refresh(generated_chart)
-    return product, generated_chart, {"vision": vision.as_dict(), "parsed": parsed, "fabric": fabric_payload, "baseline": baseline}
+    return product
 
 
-def regenerate_chart_for_product(db: Session, product: Product) -> GeneratedSizeChart:
-    measurement = db.query(Measurement).filter(Measurement.product_id == product.id).order_by(Measurement.created_at.desc()).first()
-    fabric = product.fabric_spec
-    if not measurement or not fabric:
-        raise ValueError("Product needs measurement and fabric information before chart generation")
-    baseline = {
-        "chest": measurement.chest,
-        "waist": measurement.waist,
-        "hip": measurement.hip,
-        "sleeve": measurement.sleeve,
-        "shoulder": measurement.shoulder,
-        "neck": measurement.neck,
-        "length": measurement.length,
-    }
-    fabric_payload = {
-        "fabric_type": fabric.fabric_type,
-        "gsm": fabric.gsm,
-        "stretch_percentage": fabric.stretch_percentage,
-        "weave_type": fabric.weave_type,
-        "shrink_allowance": fabric.shrink_allowance,
-        "stretch_adjustment": fabric.stretch_adjustment,
-        "notes": fabric.notes,
-    }
-    chart_payload = generate_size_chart(baseline, fabric_payload, product.category)
-    validation = validate_measurements(baseline, fabric_payload)
-    if product.generated_chart:
-        product.generated_chart.chart_json = chart_payload["sizes"]
-        product.generated_chart.explainability_json = chart_payload["explainability"]
-        product.generated_chart.validation_json = {"alerts": validation}
-        generated = product.generated_chart
-    else:
-        generated = GeneratedSizeChart(
-            product_id=product.id,
-            chart_json=chart_payload["sizes"],
-            explainability_json=chart_payload["explainability"],
-            validation_json={"alerts": validation},
-        )
-        db.add(generated)
-    product.validation_summary = {"alerts": validation}
-    product.chart_summary = chart_payload["explainability"]
+def recommend_for_product(product: Product, measurements: dict[str, float]) -> dict[str, Any]:
+    result = recommend_size(measurements, product.chart_json, {
+        "fabric_type": product.fabric_type,
+        "gsm": product.gsm,
+        "stretch_percentage": product.stretch_percentage,
+        "weave_type": product.weave_type,
+    })
+    return result
+
+
+def seed_demo_product(db: Session) -> Product | None:
+    products = db.query(Product).filter(Product.name == "Aero Performance Tee").all()
+    if products:
+        primary = products[0]
+        for duplicate in products[1:]:
+            db.delete(duplicate)
+        db.commit()
+        return primary
+
+    _, chart_payload, explanation = build_chart_payload(
+        "Tops",
+        "95% Cotton / 5% Elastane",
+        180,
+        8.0,
+        "Jersey Knit",
+        "Chest: 96\nWaist: 82\nHip: 98\nSleeve: 59\nShoulder: 45\nLength: 70",
+        None,
+        None,
+        None,
+    )
+    product = Product(
+        name="Aero Performance Tee",
+        category="Tops",
+        fabric_type="95% Cotton / 5% Elastane",
+        gsm=180,
+        stretch_percentage=8.0,
+        weave_type="Jersey Knit",
+        tech_pack_text="Chest: 96 Waist: 82 Hip: 98",
+        chart_json=chart_payload["sizes"],
+        explanation_json=explanation,
+    )
+    db.add(product)
     db.commit()
-    db.refresh(generated)
-    return generated
-
-
-def validate_measurements(measurements: dict[str, float], fabric: dict[str, Any]) -> list[str]:
-    alerts: list[str] = []
-    ranges = {
-        "chest": (60.0, 160.0),
-        "waist": (50.0, 150.0),
-        "hip": (70.0, 170.0),
-        "sleeve": (40.0, 100.0),
-        "shoulder": (35.0, 75.0),
-        "neck": (30.0, 55.0),
-        "length": (45.0, 120.0),
-    }
-    for key, value in measurements.items():
-        low, high = ranges[key]
-        if value <= 0:
-            alerts.append(f"{key.title()} is missing or non-positive.")
-        elif value < low or value > high:
-            alerts.append(f"{key.title()} looks like an outlier ({value:.1f} cm).")
-    stretch = fabric.get("stretch_percentage") or 0
-    gsm = fabric.get("gsm") or 0
-    if stretch < 0 or stretch > 40:
-        alerts.append("Stretch percentage is outside the normal apparel range.")
-    if gsm and gsm > 500:
-        alerts.append("GSM is unusually high for a retail apparel SKU.")
-    if not alerts:
-        alerts.append("Measurements validated successfully.")
-    return alerts
-
-
-def recommendation_cache_key(product_id: str, payload: dict[str, Any]) -> str:
-    canonical = json.dumps({"product_id": product_id, **payload}, sort_keys=True, default=str)
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return f"fitwise:recommendation:{digest}"
-
-
-def current_size_order(size: str) -> int:
-    normalized = size.upper().strip()
-    if normalized not in SIZE_ORDER:
-        return 2
-    return SIZE_ORDER.index(normalized)
-
-
-def brand_adjustments(brand_name: str | None) -> dict[str, float]:
-    if not brand_name:
-        return {"chest": 0.0, "waist": 0.0, "hip": 0.0}
-    return BRAND_PRIORS.get(brand_name.lower(), {"chest": 0.0, "waist": 0.0, "hip": 0.0})
-
-
-def similar_feedback_boost(db: Session, product_id: str, recommended_size: str) -> float:
-    query = (
-        db.query(func.avg(Feedback.fit_rating))
-        .join(Recommendation, Recommendation.id == Feedback.recommendation_id)
-        .filter(Recommendation.product_id == product_id)
-        .filter(Recommendation.recommended_size == recommended_size)
+    db.refresh(product)
+    recommendation = Recommendation(
+        product_id=product.id,
+        height=175,
+        weight=72,
+        chest=96,
+        waist=82,
+        hip=98,
+        recommended_size="M",
+        confidence_score=0.96,
+        reason_json=["Chest matches.", "Fabric has 8% stretch.", "Comfortable fit."],
     )
-    average = query.scalar() or 0.0
-    return min(float(average) * 0.015, 0.06)
-
-
-def upsert_customer_profile(db: Session, request_payload: dict[str, Any]) -> CustomerProfile:
-    measurements = request_payload.get("measurements") or {}
-    brand = request_payload.get("brand") or {}
-    profile = CustomerProfile(
-        height=measurements.get("height"),
-        weight=measurements.get("weight"),
-        chest=measurements.get("chest"),
-        waist=measurements.get("waist"),
-        hip=measurements.get("hip"),
-        brand_name=brand.get("brand_name"),
-        current_size=brand.get("current_size"),
-        feature_embedding={
-            "measurement_hash": hashlib.sha256(json.dumps(request_payload, sort_keys=True, default=str).encode("utf-8")).hexdigest(),
-        },
-    )
-    db.add(profile)
-    db.flush()
-    return profile
-
-
-def generate_recommendation(db: Session, product: Product, payload: dict[str, Any]) -> tuple[str, float, list[str], list[dict[str, Any]]]:
-    chart = product.generated_chart
-    if not chart:
-        raise ValueError("Generate the size chart first")
-    chart_rows = chart.chart_json
-    target = payload.get("measurements") or {}
-    brand = payload.get("brand") or {}
-    if brand.get("brand_name"):
-        adjustments = brand_adjustments(brand.get("brand_name"))
-        target = {
-            "chest": _normalize_float(target.get("chest"), 0.0) + adjustments["chest"],
-            "waist": _normalize_float(target.get("waist"), 0.0) + adjustments["waist"],
-            "hip": _normalize_float(target.get("hip"), 0.0) + adjustments["hip"],
-        }
-    result = recommend_size(target, chart_rows, product.fabric_spec, payload.get("historical_feedback_count") or 0)
-    feedback_boost = similar_feedback_boost(db, product.id, result["recommended_size"])
-    confidence = min(result["confidence_score"] + feedback_boost, 0.99)
-    explanation = result["explanation"][:]
-    if feedback_boost > 0:
-        explanation.append("Historical feedback increased confidence for this size.")
-    return result["recommended_size"], confidence, explanation, chart_rows
-
-
-def admin_summary(db: Session) -> dict[str, Any]:
-    total_products = db.query(func.count(Product.id)).scalar() or 0
-    total_recommendations = db.query(func.count(Recommendation.id)).scalar() or 0
-    cached_rows = db.query(Recommendation).all()
-    total_cached = sum(1 for row in cached_rows if bool((row.request_snapshot_json or {}).get("cache_hit")))
-    cache_hit_rate = round((total_cached / total_recommendations) if total_recommendations else 0.0, 3)
-    validation_alerts = []
-    products = db.query(Product).order_by(Product.created_at.desc()).limit(5).all()
-    for product in products:
-        alerts = (product.validation_summary or {}).get("alerts", [])
-        validation_alerts.extend([f"{product.name}: {alert}" for alert in alerts if "validated successfully" not in alert.lower()])
-    top_trends = []
-    for row in db.query(Recommendation.recommended_size, func.count(Recommendation.id)).group_by(Recommendation.recommended_size).order_by(func.count(Recommendation.id).desc()).all():
-        top_trends.append({"size": row[0], "count": row[1]})
-    return {
-        "total_products": total_products,
-        "total_recommendations": total_recommendations,
-        "cache_hit_rate": cache_hit_rate,
-        "validation_alerts": validation_alerts[:6],
-        "top_sizing_trends": top_trends,
-    }
+    db.add(recommendation)
+    db.commit()
+    return product

@@ -13,12 +13,11 @@ export function LandingPage() {
             Generate fit charts and size recommendations in one workflow.
           </h1>
           <p className="max-w-2xl text-lg leading-8 text-slate-300">
-            FitWise AI combines garment vision heuristics, tech-pack parsing, fabric rules, and a lightweight fit model to help sellers publish better size charts and help customers choose the right size faster.
+            FitWise AI keeps sizing simple. Sellers upload product details and files, the backend generates a size chart, and customers get a recommendation from a clean rule-based fit engine.
           </p>
           <div className="flex flex-wrap gap-3">
             <Link to="/seller"><Button>Open Seller Dashboard</Button></Link>
             <Link to="/customer"><Button variant="secondary">Try Fit Assistant</Button></Link>
-            <Link to="/admin"><Button variant="ghost">View Admin Insights</Button></Link>
           </div>
         </div>
         <Panel className="relative overflow-hidden">
@@ -26,13 +25,13 @@ export function LandingPage() {
           <div className="relative space-y-5">
             <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Why FitWise</div>
             <div className="grid grid-cols-2 gap-3">
-              <StatChip label="Latency target" value="<150 ms" />
-              <StatChip label="Cache layer" value="Redis" />
-              <StatChip label="AI pipeline" value="Vision + OCR + NLP" />
-              <StatChip label="Deployment" value="Docker Compose" />
+              <StatChip label="Pages" value="3" />
+              <StatChip label="Database" value="SQLite" />
+              <StatChip label="AI" value="Rule-based" />
+              <StatChip label="Deploy" value="Docker Compose" />
             </div>
             <div className="rounded-3xl border border-white/10 bg-slate-950/55 p-4 text-sm leading-7 text-slate-300">
-              Sellers upload product images and a tech pack. FitWise then extracts measurements, applies fabric rules, generates a graded size chart, and recommends the best size for each customer with an explanation.
+              Sellers upload product images and a tech pack. FitWise then saves the product, creates a size chart, and returns a size recommendation with a short explanation.
             </div>
           </div>
         </Panel>
@@ -40,9 +39,9 @@ export function LandingPage() {
 
       <section className="grid gap-4 md:grid-cols-3">
         {[
-          ['Seller dashboard', 'Upload product assets, infer garment measurements, and publish a dynamic chart.'],
-          ['Customer fit assistant', 'Enter body metrics or brand preferences and receive a size recommendation.'],
-          ['Admin visibility', 'Track recommendations, feedback, and validation alerts in one place.'],
+          ['Seller dashboard', 'Upload product details and generate a chart immediately.'],
+          ['Customer fit assistant', 'Enter body measurements and get a size recommendation.'],
+          ['Demo product', 'A demo product is seeded on startup so the app works immediately.'],
         ].map(([title, body]) => (
           <Panel key={title} className="space-y-3">
             <h3 className="text-xl font-semibold text-white">{title}</h3>

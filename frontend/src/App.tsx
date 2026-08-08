@@ -1,5 +1,4 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
-import { AdminDashboard } from './pages/AdminDashboard'
 import { CustomerFitAssistant } from './pages/CustomerFitAssistant'
 import { LandingPage } from './pages/LandingPage'
 import { SellerDashboard } from './pages/SellerDashboard'
@@ -20,7 +19,6 @@ export default function App() {
             <NavLink to="/" className={navItemClass} end>Home</NavLink>
             <NavLink to="/seller" className={navItemClass}>Seller</NavLink>
             <NavLink to="/customer" className={navItemClass}>Customer</NavLink>
-            <NavLink to="/admin" className={navItemClass}>Admin</NavLink>
           </nav>
         </div>
       </header>
@@ -30,7 +28,6 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/seller" element={<SellerDashboard />} />
           <Route path="/customer" element={<CustomerFitAssistant />} />
-          <Route path="/admin" element={<AdminDashboard />} />
         </Routes>
       </main>
     </div>

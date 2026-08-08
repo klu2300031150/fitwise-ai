@@ -5,6 +5,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 
 @dataclass(frozen=True)
 class VisionMeasurements:
@@ -46,9 +48,23 @@ def _path_influence(path: str | None) -> float:
     if not path:
         return 0.0
     file_path = Path(path)
-    size_kb = max(file_path.stat().st_size / 1024.0, 1.0) if file_path.exists() else 1.0
+    if not file_path.exists():
+        return 0.0
+    size_kb = max(file_path.stat().st_size / 1024.0, 1.0)
     signature = _file_signature(path)
-    return ((signature % 97) / 97.0) + min(size_kb / 200.0, 1.5)
+    visual_score = ((signature % 97) / 97.0) + min(size_kb / 200.0, 1.5)
+    if path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
+        try:
+            with Image.open(path) as image:
+                image = image.convert('L')
+                histogram = image.histogram()
+                total = sum(histogram)
+                if total:
+                    brightness = sum(i * count for i, count in enumerate(histogram)) / total
+                    visual_score += min(brightness / 255.0, 1.0)
+        except Exception:
+            pass
+    return visual_score
 
 
 def estimate_measurements_from_images(
@@ -76,5 +92,5 @@ def estimate_measurements_from_images(
         neck=neck,
         length=length,
         confidence=confidence,
-        source="opencv-deterministic-mock",
+        source="image-fallback",
     )

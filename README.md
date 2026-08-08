@@ -1,50 +1,30 @@
 # FitWise AI - Dynamic Size & Fit Chart Generator
 
-FitWise AI is a production-oriented hackathon MVP for apparel sizing intelligence. Sellers upload garment assets and a tech pack; the platform extracts measurements, applies fabric rules, generates a graded size chart, and recommends the best size for each customer.
+FitWise AI is a simplified MVP for apparel sizing intelligence. Sellers upload garment details and a tech pack, the backend generates a size chart, and customers get a size recommendation from a rule-based fit engine.
 
 ## What is included
 
-- Seller dashboard for uploads and size chart generation
-- Customer fit assistant for body measurements or brand-based inputs
-- Admin dashboard for validation alerts and sizing trends
-- FastAPI backend with JWT authentication and role-based access
-- PostgreSQL schema and Redis-backed recommendation cache
-- Docker Compose setup for local development
-- Mermaid architecture diagram and API documentation
+- Home page
+- Seller dashboard for product upload and chart generation
+- Customer fit assistant for measurement-based recommendations
+- FastAPI backend with SQLite storage
+- Docker Compose with backend and frontend containers only
+- Rule-based size chart and recommendation engine
 
 ## Local setup
 
-1. Copy `.env.example` to `.env` and adjust values if needed.
+1. Copy `.env.example` to `.env` if needed.
 2. Start the stack:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-3. Open the apps:
+3. Open the app:
 - Frontend: http://localhost:5173
-- Backend health: http://localhost:8000/health
-
-## Demo accounts
-
-- Seller: `seller@fitwise.ai` / `Password123!`
-- Customer: `customer@fitwise.ai` / `Password123!`
-- Admin: `admin@fitwise.ai` / `Password123!`
-
-## API flow
-
-1. Log in with a demo account to get a JWT token.
-2. Paste the token into the Seller, Customer, or Admin page.
-3. Upload product assets to generate a size chart.
-4. Run the fit assistant to get a recommended size and explanation.
-5. Submit feedback to refine future recommendations.
-
-## Architecture
-
-See [docs/architecture.md](docs/architecture.md).
 
 ## Notes
 
-- The MVP uses deterministic AI heuristics where datasets or trained models are unavailable.
-- The backend never stores raw customer body photos; it stores only structured measurements and feature embeddings.
-- Recommendation responses are cached in Redis when available and fall back to in-memory caching otherwise.
+- A demo product is seeded on backend startup so the customer assistant works immediately.
+- There is no authentication, Redis, or PostgreSQL required for this MVP.
+- Upload a product from the seller dashboard and then use the customer assistant to get a recommended size.

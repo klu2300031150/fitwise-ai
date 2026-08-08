@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
@@ -15,7 +15,8 @@ RUN pip install -r requirements.txt
 
 COPY backend/app ./backend/app
 COPY ai ./ai
-COPY database ./database
+
+RUN mkdir -p /app/data /app/storage
 
 ENV PYTHONPATH=/app:/app/backend
 EXPOSE 8000

@@ -12,5 +12,6 @@ __pycache__
 backend/storage/uploads
 backend/fitwise.db
 frontend/dist
+*.tsbuildinfo
 .DS_Store
 .vscode/.ropeproject

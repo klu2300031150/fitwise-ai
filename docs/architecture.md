@@ -2,21 +2,12 @@
 
 ```mermaid
 graph TD
-    A[Seller / Customer / Admin] --> B[React + Vite UI]
+    A[Seller / Customer] --> B[React + Vite UI]
     B --> C[FastAPI REST API]
-    C --> D[JWT Auth + Role Guards]
-    C --> E[Vision Agent]
-    C --> F[OCR Agent]
-    C --> G[NLP Agent]
-    C --> H[Fabric Intelligence]
-    C --> I[Fit Recommendation Engine]
-    C --> J[(PostgreSQL)]
-    C --> K[(Redis Cache)]
-    E --> L[OpenCV Mock Heuristics]
-    F --> M[PDF Text Extraction]
-    G --> N[Structured JSON Parsing]
-    H --> O[Business Rules]
-    I --> P[Size Recommendation]
+    C --> D[SQLite Database]
+    C --> E[Rule-based Recommendation Engine]
+    C --> F[PDF text extraction + upload storage]
+    C --> G[Size chart generation]
 ```
 
-The flow is intentionally layered so the seller upload pipeline can evolve independently from the recommendation endpoint.
+This slimmed-down MVP keeps the flow simple: sellers upload product details, the backend generates a size chart, and customers receive a recommended size based on measurements.

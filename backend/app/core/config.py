@@ -10,10 +10,6 @@ class Settings(BaseSettings):
     app_name: str = Field(default="FitWise AI")
     environment: str = Field(default="development")
     database_url: str = Field(default="sqlite:///./fitwise.db")
-    redis_url: str = Field(default="redis://localhost:6379/0")
-    jwt_secret_key: str = Field(default="change-me-in-production")
-    jwt_algorithm: str = Field(default="HS256")
-    access_token_expire_minutes: int = Field(default=120)
     cors_origins: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")
     storage_dir: str = Field(default="storage")
 
