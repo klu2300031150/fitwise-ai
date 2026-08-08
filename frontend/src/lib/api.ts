@@ -23,6 +23,10 @@ export async function createProduct(formData: FormData): Promise<ProductCreateRe
   return response.data
 }
 
+export async function deleteProduct(productId: string): Promise<void> {
+  await api.delete(`/products/${productId}`)
+}
+
 export async function recommendSize(payload: RecommendationRequest): Promise<RecommendationResponse> {
   const response = await api.post<RecommendationResponse>('/recommend', payload)
   return response.data

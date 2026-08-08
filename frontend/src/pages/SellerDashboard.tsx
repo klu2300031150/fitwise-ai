@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { createProduct, listProducts } from '../lib/api'
+import { createProduct, listProducts, deleteProduct } from '../lib/api'
 import type { Product } from '../types'
 import { Button, Input, Label, Panel } from '../components/ui'
 
@@ -82,10 +82,37 @@ export function SellerDashboard() {
           <h3 className="text-xl font-semibold text-white">Your Products</h3>
           <div className="space-y-3">
             {products.map((product) => (
-              <button key={product.id} type="button" onClick={() => setSelectedProduct(product)} className={`w-full rounded-2xl border p-4 text-left transition ${selectedProduct?.id === product.id ? 'border-accent-300 bg-accent-300/10' : 'border-white/10 bg-slate-950/40'}`}>
-                <div className="font-semibold text-white">{product.name}</div>
-                <div className="text-sm text-slate-400">{product.category} · {product.fabric_type}</div>
-              </button>
+              <div key={product.id} className={`w-full rounded-2xl border p-4 transition ${selectedProduct?.id === product.id ? 'border-accent-300 bg-accent-300/10' : 'border-white/10 bg-slate-950/40'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="text-left" style={{ flex: 1 }}>
+                    <button type="button" onClick={() => setSelectedProduct(product)} className="text-left w-full">
+                      <div className="font-semibold text-white">{product.name}</div>
+                      <div className="text-sm text-slate-400">{product.category} · {product.fabric_type}</div>
+                    </button>
+                  </div>
+                  <div>
+                    <Button
+                      onClick={async () => {
+                        const ok = window.confirm(`Delete product \"${product.name}\"? This cannot be undone.`)
+                        if (!ok) return
+                        setStatus('Deleting product...')
+                        try {
+                          await deleteProduct(product.id)
+                          const refreshed = await listProducts()
+                          setProducts(refreshed)
+                          setSelectedProduct((prev) => (prev && prev.id === product.id ? null : prev))
+                          setStatus('Product deleted successfully.')
+                        } catch (err) {
+                          setStatus(err instanceof Error ? err.message : 'Delete failed')
+                        }
+                      }}
+                      className="bg-red-600 hover:bg-red-500"
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              </div>
             ))}
             {!products.length && <p className="text-sm text-slate-400">No products yet. Upload the first SKU to begin.</p>}
           </div>

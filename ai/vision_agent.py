@@ -53,9 +53,9 @@ def _path_influence(path: str | None) -> float:
     size_kb = max(file_path.stat().st_size / 1024.0, 1.0)
     signature = _file_signature(path)
     visual_score = ((signature % 97) / 97.0) + min(size_kb / 200.0, 1.5)
-    if path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
+    if file_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
         try:
-            with Image.open(path) as image:
+            with Image.open(file_path) as image:
                 image = image.convert('L')
                 histogram = image.histogram()
                 total = sum(histogram)

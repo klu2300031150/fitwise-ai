@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+import shutil
+from pathlib import Path
 
 from app.core.config import settings
 from app.db.session import Base, engine, get_db
@@ -189,3 +191,29 @@ def recommend(payload: RecommendationRequest, db: Session = Depends(get_db)) -> 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.delete("/products/{product_id}")
+def delete_product(product_id: str, db: Session = Depends(get_db)) -> dict:
+    product = db.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Remove related recommendations
+    try:
+        db.query(Recommendation).filter(Recommendation.product_id == product.id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
+    # Remove stored files for the product
+    try:
+        storage_root = Path(settings.storage_dir)
+        product_dir = storage_root / product.id
+        if product_dir.exists():
+            shutil.rmtree(product_dir)
+    except Exception:
+        pass
+
+    db.delete(product)
+    db.commit()
+    return {"message": "Product deleted"}
